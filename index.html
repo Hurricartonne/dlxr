@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>DLXR Tracker Multi V6</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:      #0a0e1a;
+      --panel:   #0f1628;
+      --border:  #1e2d4a;
+      --accent:  #00d4ff;
+      --accent2: #ff6b35;
+      --green:   #00ff9d;
+      --yellow:  #ffd700;
+      --text:    #e0eeff;
+      --muted:   #4a6080;
+      --mono:    'Share Tech Mono', monospace;
+      --sans:    'Exo 2', sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--sans);
+      height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px; background: var(--panel);
+      border-bottom: 1px solid var(--border); z-index: 1000; flex-shrink: 0;
+    }
+    .logo { font-family: var(--mono); font-size: 1rem; color: var(--accent); letter-spacing: 3px; }
+    .logo span { color: var(--accent2); }
+    #ble-btn {
+      background: transparent; border: 1.5px solid var(--accent);
+      color: var(--accent); font-family: var(--mono); font-size: 0.72rem;
+      padding: 5px 12px; border-radius: 4px; cursor: pointer; letter-spacing: 1px;
+    }
+    #ble-btn.connected { border-color: var(--green); color: var(--green); }
+    #map { flex: 1; width: 100%; z-index: 1; }
+    #panel {
+      background: var(--panel); border-top: 1px solid var(--border);
+      padding: 5px 12px 8px; flex-shrink: 0; z-index: 1000;
+      max-height: 35vh; overflow-y: auto;
+    }
+
+    /* Ligne Home pilote */
+    .home-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 3px 0; border-bottom: 1px solid var(--border);
+    }
+    .home-label { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; min-width: 36px; }
+    .home-pos { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+
+    /* Lignes modèles */
+    .model-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 0; border-bottom: 1px solid var(--border);
+    }
+    .model-row:last-of-type { border-bottom: none; }
+    .model-id {
+      font-family: var(--mono); font-size: 0.68rem; font-weight: 600;
+      padding: 2px 6px; border-radius: 3px; color: #0a0e1a;
+      flex-shrink: 0; min-width: 38px; text-align: center;
+    }
+    .state-badge {
+      font-family: var(--mono); font-size: 0.65rem; font-weight: 600;
+      padding: 2px 6px; border-radius: 3px; letter-spacing: 1px;
+      background: var(--muted); color: var(--bg); flex-shrink: 0;
+    }
+    .state-badge.BOOT   { background: var(--yellow); }
+    .state-badge.LOW    { background: var(--accent); }
+    .state-badge.HIGH   { background: var(--green); }
+    .state-badge.GROUND { background: var(--accent2); }
+    .model-data { font-family: var(--mono); font-size: 0.7rem; color: var(--text); }
+    .model-data span { margin-right: 6px; }
+    .model-data .alt  { color: var(--accent); }
+    .model-data .dist { color: var(--green); }
+    .model-data .rssi { color: var(--muted); }
+    .nav-btn {
+      margin-left: auto; flex-shrink: 0;
+      background: transparent; border: 1.5px solid var(--green);
+      color: var(--green); font-family: var(--mono); font-size: 0.65rem;
+      padding: 2px 8px; border-radius: 4px; cursor: pointer; letter-spacing: 1px;
+      white-space: nowrap;
+    }
+    .nav-btn:active { background: var(--green); color: var(--bg); }
+
+    #status {
+      font-family: var(--mono); font-size: 0.6rem; color: var(--muted);
+      text-align: center; margin-top: 5px; letter-spacing: 1px;
+    }
+
+    /* Marqueurs */
+    .model-marker { width: 16px; height: 16px; position: relative; }
+    .model-marker::before, .model-marker::after {
+      content: ''; position: absolute;
+    }
+    .model-marker::before { width: 16px; height: 2px; top: 7px; left: 0; }
+    .model-marker::after  { width: 2px; height: 16px; top: 0; left: 7px; }
+    .model-dot {
+      position: absolute; width: 4px; height: 4px;
+      border-radius: 50%; top: 6px; left: 6px;
+    }
+    .user-marker {
+      width: 14px; height: 14px; background: #4a90ff;
+      border: 2px solid white; border-radius: 50%;
+      box-shadow: 0 0 8px rgba(74,144,255,0.8);
+      animation: userpulse 2s infinite;
+    }
+    @keyframes userpulse {
+      0%,100% { box-shadow: 0 0 4px rgba(74,144,255,0.8); }
+      50%      { box-shadow: 0 0 14px rgba(74,144,255,1); }
+    }
+    .leaflet-tile { filter: brightness(0.85) saturate(0.7) hue-rotate(180deg) invert(1); }
+    .leaflet-container { background: #0a0e1a; }
+    #center-btn {
+      position: absolute; bottom: 140px; right: 16px; z-index: 999;
+      background: var(--panel); border: 1.5px solid var(--border);
+      color: var(--accent); width: 40px; height: 40px;
+      border-radius: 8px; font-size: 1.1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #no-model {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+      text-align: center; padding: 6px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">DL<span>X</span>R MULTI V6</div>
+    <button id="ble-btn" onclick="connectBLE()">⚡ CONNECTER</button>
+  </header>
+
+  <div id="map"></div>
+  <button id="center-btn" onclick="centerAll()" title="Centrer sur tous les modèles">🎯</button>
+
+  <div id="panel">
+    <div class="home-row">
+      <span class="home-label">Home</span>
+      <span class="home-pos" id="m-mypos">Localisation...</span>
+    </div>
+    <div id="models-list">
+      <div id="no-model">En attente de signal...</div>
+    </div>
+    <div id="status">EN ATTENTE DE CONNEXION BLE</div>
+  </div>
+
+  <div id="log-bar">
+    <button id="log-btn">⏺ LOG</button>
+    <button id="dl-btn">⬇ TÉLÉCHARGER</button>
+    <span id="log-info">Log inactif</span>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+    const CHARACT_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+
+    // Palette de couleurs pour les modèles
+    const COLORS = [
+      '#00d4ff', '#ff6b35', '#00ff9d', '#ffd700', '#ff3b5c',
+      '#a855f7', '#f97316', '#22d3ee', '#4ade80', '#fb7185'
+    ];
+
+    let bleDevice = null, bleCharact = null;
+    let myLat = null, myLon = null, userMarker = null;
+    let autoCenter = true;
+
+    // Stockage des modèles
+    // models[did] = { lat, lon, dist, alt, etat, rssi, moved, abaro, vbat,
+    //                 color, colorIdx, marker, polyline, tracePath, linkLine,
+    //                 rxCount, lastSeen, rowEl }
+    const models = {};
+    let modelCount = 0;
+
+    // Wake Lock & reconnexion
+    let wakeLock = null;
+    let reconnectTimer = null;
+    let isReconnecting = false;
+
+    // LOG CSV
+    let logActive = false;
+    let logLines = [];
+    let logStartTime = null;
+    const LOG_HEADER = 'Heure;Indicatif;Latitude;Longitude;Altitude_m;Distance_m;Azimut_deg;Etat;RSSI_dBm';
+
+    const map = L.map('map', { center: [48.8566, 2.3522], zoom: 15, zoomControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+    L.control.zoom({ position: 'topleft' }).addTo(map);
+    map.on('dragstart', () => { autoCenter = false; });
+
+    const userIcon = L.divIcon({
+      className: '',
+      html: '<div class="user-marker"></div>',
+      iconSize: [14, 14], iconAnchor: [7, 7]
+    });
+
+    function makeModelIcon(color) {
+      return L.divIcon({
+        className: '',
+        html: `<div class="model-marker" style="--c:${color}">
+                 <div style="position:absolute;width:16px;height:2px;top:7px;left:0;background:${color}"></div>
+                 <div style="position:absolute;width:2px;height:16px;top:0;left:7px;background:${color}"></div>
+                 <div class="model-dot" style="background:#ff6b35"></div>
+               </div>`,
+        iconSize: [16, 16], iconAnchor: [8, 8]
+      });
+    }
+
+    function getOrCreateModel(did) {
+      if (models[did]) return models[did];
+
+      const colorIdx = modelCount % COLORS.length;
+      const color = COLORS[colorIdx];
+      modelCount++;
+
+      // Créer la ligne dans le panel
+      const row = document.createElement('div');
+      row.className = 'model-row';
+      row.id = 'row-' + did;
+      row.innerHTML = `
+        <span class="model-id" style="background:${color}">${did}</span>
+        <span class="state-badge" id="badge-${did}">--</span>
+        <div class="model-data">
+          <span class="alt" id="alt-${did}">Alt:--</span>
+          <span class="dist" id="dist-${did}">--m</span>
+          <span class="rssi" id="rssi-${did}">--dBm</span>
+        </div>
+        <button class="nav-btn" id="nav-${did}" onclick="navigateTo('${did}')" disabled>🧭 NAV</button>`;
+
+      const noModel = document.getElementById('no-model');
+      if (noModel) noModel.remove();
+      document.getElementById('models-list').appendChild(row);
+
+      models[did] = {
+        color, colorIdx, rxCount: 0, lastSeen: 0,
+        marker: null, polyline: null, tracePath: [], linkLine: null,
+        rowEl: row,
+        lat: 0, lon: 0, dist: 0, alt: 0, etat: '--',
+        rssi: 0, moved: false
+      };
+
+      setStatus(`Nouveau modèle détecté : ${did}`);
+      return models[did];
+    }
+
+    function updateModelMap(did, m) {
+      if (m.lat === 0 && m.lon === 0) return;
+      const latlng = [m.lat, m.lon];
+
+      if (!m.marker) {
+        m.marker = L.marker(latlng, { icon: makeModelIcon(m.color) })
+          .bindTooltip(did, { permanent: false, direction: 'top' })
+          .addTo(map);
+        if (autoCenter) map.setView(latlng, 16);
+      } else {
+        m.marker.setLatLng(latlng);
+      }
+
+      m.tracePath.push(latlng);
+      if (m.polyline) {
+        m.polyline.setLatLngs(m.tracePath);
+      } else {
+        m.polyline = L.polyline(m.tracePath, {
+          color: m.color, weight: 2, opacity: 0.6, dashArray: '4 6'
+        }).addTo(map);
+      }
+
+      // Lien pilote → modèle
+      if (myLat !== null) {
+        const pts = [[myLat, myLon], [m.lat, m.lon]];
+        if (m.linkLine) {
+          m.linkLine.setLatLngs(pts);
+        } else {
+          m.linkLine = L.polyline(pts, {
+            color: m.color, weight: 1, opacity: 0.35, dashArray: '4 8'
+          }).addTo(map);
+        }
+      }
+
+      if (autoCenter) map.panTo(latlng);
+    }
+
+    function updateModelPanel(did, m) {
+      const badge = document.getElementById('badge-' + did);
+      const altEl = document.getElementById('alt-' + did);
+      const distEl = document.getElementById('dist-' + did);
+      const rssiEl = document.getElementById('rssi-' + did);
+      if (!badge) return;
+
+      const etat = m.etat.toUpperCase().split(',')[0].trim();
+      badge.textContent = etat;
+      badge.className = 'state-badge ' + etat;
+
+      altEl.textContent  = `Alt:${parseFloat(m.alt || 0).toFixed(0)}m`;
+      distEl.textContent = m.dist < 1000
+        ? `Dist:${parseFloat(m.dist).toFixed(0)}m`
+        : `Dist:${(m.dist / 1000).toFixed(2)}km`;
+      rssiEl.textContent = `${parseFloat(m.rssi).toFixed(0)}dBm`;
+
+      // Activer le bouton NAV si coordonnées valides
+      const navBtn = document.getElementById('nav-' + did);
+      if (navBtn && m.lat !== 0 && m.lon !== 0) {
+        navBtn.disabled = false;
+        navBtn.style.borderColor = 'var(--green)';
+        navBtn.style.color = 'var(--green)';
+      }
+    }
+
+    function navigateTo(did) {
+      const m = models[did];
+      if (!m || m.lat === 0 || m.lon === 0) return;
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${m.lat.toFixed(7)},${m.lon.toFixed(7)}&travelmode=walking`;
+      window.open(url, '_blank');
+    }
+
+    // Buffer BLE — les trames BLE peuvent arriver en plusieurs fragments
+    let bleBuffer = '';
+
+    function handleData(raw) {
+      // Accumuler les fragments jusqu'à avoir un JSON complet
+      bleBuffer += raw;
+
+      // Extraire tous les JSON complets du buffer (entre { et })
+      let start = bleBuffer.indexOf('{');
+      while (start !== -1) {
+        let depth = 0, end = -1;
+        for (let i = start; i < bleBuffer.length; i++) {
+          if (bleBuffer[i] === '{') depth++;
+          else if (bleBuffer[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+        }
+        if (end === -1) break; // JSON incomplet — attendre la suite
+
+        const jsonStr = bleBuffer.slice(start, end + 1);
+        bleBuffer = bleBuffer.slice(end + 1); // Consommer
+
+        try {
+          const d = JSON.parse(jsonStr);
+
+          // Trame ID DGAC
+          if (d.id !== undefined) {
+            setStatus('ID DGAC reçu : ' + d.id);
+          } else {
+            const did = d.did || 'BB01';
+            const m = getOrCreateModel(did);
+
+            m.lat   = parseFloat(d.lat  || 0);
+            m.lon   = parseFloat(d.lon  || 0);
+            m.dist  = parseFloat(d.dist || 0);
+            m.alt   = parseFloat(d.alt  || 0);
+            m.etat  = (d.etat || '--');
+            m.rssi  = parseFloat(d.rssi || 0);
+            m.moved = d.moved !== false;
+            m.abaro = parseFloat(d.abaro || 0);
+            m.vbat  = parseFloat(d.vbat  || 0);
+            m.rxCount++;
+            m.lastSeen = Date.now();
+
+            updateModelMap(did, m);
+            updateModelPanel(did, m);
+            logTrame(did, m);
+
+            setStatus(`${did} — trame #${m.rxCount} — ${m.etat}`);
+          }
+        } catch(e) {
+          // JSON malformé — ignorer silencieusement
+        }
+
+        start = bleBuffer.indexOf('{');
+      }
+
+      // Nettoyer le buffer si trop long sans JSON valide
+      if (bleBuffer.length > 512) bleBuffer = '';
+    }
+
+    function centerAll() {
+      autoCenter = true;
+      const pts = Object.values(models)
+        .filter(m => m.lat !== 0 && m.lon !== 0)
+        .map(m => [m.lat, m.lon]);
+      if (myLat !== null) pts.push([myLat, myLon]);
+      if (pts.length === 0) return;
+      if (pts.length === 1) { map.setView(pts[0], 16); return; }
+      map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+    }
+
+    function startGeolocation() {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.watchPosition(pos => {
+        myLat = pos.coords.latitude;
+        myLon = pos.coords.longitude;
+        if (!userMarker) {
+          userMarker = L.marker([myLat, myLon], { icon: userIcon })
+            .bindTooltip('📍 Moi', { permanent: false, direction: 'top' })
+            .addTo(map);
+          map.setView([myLat, myLon], 15);
+        } else {
+          userMarker.setLatLng([myLat, myLon]);
+        }
+        document.getElementById('m-mypos').textContent =
+          `${myLat.toFixed(6)}, ${myLon.toFixed(6)}`;
+        // Mettre à jour tous les liens
+        Object.entries(models).forEach(([did, m]) => {
+          if (m.lat !== 0 && m.lon !== 0) updateModelMap(did, m);
+        });
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 2000 });
+    }
+
+    async function connectBLE() {
+      if (!navigator.bluetooth) {
+        setStatus('WEB BLUETOOTH NON SUPPORTÉ — UTILISE CHROME');
+        return;
+      }
+      try {
+        setStatus('RECHERCHE DLXR_RX...');
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'DLXR_RX' }], optionalServices: [SERVICE_UUID]
+        });
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+        setStatus('CONNEXION EN COURS...');
+        const server  = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        bleCharact    = await service.getCharacteristic(CHARACT_UUID);
+        const val = await bleCharact.readValue();
+        handleData(new TextDecoder().decode(val));
+        await bleCharact.startNotifications();
+        bleCharact.addEventListener('characteristicvaluechanged', e => {
+          handleData(new TextDecoder().decode(e.target.value));
+        });
+        const btn = document.getElementById('ble-btn');
+        btn.textContent = '✓ CONNECTÉ';
+        btn.classList.add('connected');
+        setStatus('BLE CONNECTÉ — EN ÉCOUTE');
+        isReconnecting = false;
+        // Wake Lock — empêche la mise en veille de l'écran si supporté
+        try {
+          if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => {
+              // Re-acquérir le wake lock si la page redevient visible
+              document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState === 'visible') {
+                  try { wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+                }
+              }, { once: true });
+            });
+          }
+        } catch(e) { /* Wake Lock non supporté — pas bloquant */ }
+      } catch(e) {
+        setStatus('ERREUR BLE: ' + e.message);
+      }
+    }
+
+    function onDisconnected() {
+      const btn = document.getElementById('ble-btn');
+      btn.textContent = '⚡ CONNECTER';
+      btn.classList.remove('connected');
+      // Marquer tous les modèles comme "signal perdu"
+      Object.values(models).forEach(m => {
+        if (m.marker) {
+          m.marker.setOpacity(0.35);
+          const row = document.getElementById('row-' + m.did);
+          if (row) row.style.opacity = '0.5';
+        }
+      });
+      setStatus('BLE DÉCONNECTÉ — Reconnexion auto dans 3s...');
+      // Reconnexion automatique
+      if (!isReconnecting) {
+        isReconnecting = true;
+        reconnectTimer = setTimeout(() => autoReconnect(), 3000);
+      }
+    }
+
+    // ─── FONCTIONS LOG ────────────────────────────────────────────
+    function toggleLog() {
+      logActive = !logActive;
+      const btn = document.getElementById('log-btn');
+      const dlBtn = document.getElementById('dl-btn');
+      const info = document.getElementById('log-info');
+      if (logActive) {
+        logLines = [LOG_HEADER];
+        logStartTime = new Date();
+        btn.textContent = '⏹ STOP LOG';
+        btn.classList.add('active');
+        dlBtn.classList.add('ready');
+        info.textContent = '0 trames';
+        setStatus('Log démarré');
+      } else {
+        btn.textContent = '⏺ LOG';
+        btn.classList.remove('active');
+        const n = logLines.length - 1;
+        info.textContent = n + ' trames enregistrées';
+        setStatus('Log arrêté — ' + n + ' trames');
+      }
+    }
+
+    function calcAzimut(lat1, lon1, lat2, lon2) {
+      if (!lat1 || !lat2) return '';
+      const toRad = d => d * Math.PI / 180;
+      const dLon = toRad(lon2 - lon1);
+      const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2))
+              - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+      let az = Math.atan2(y, x) * 180 / Math.PI;
+      return ((az + 360) % 360).toFixed(1);
+    }
+
+    function logTrame(did, m) {
+      if (!logActive) return;
+      if (m.lat === 0 && m.lon === 0) return;
+      const now = new Date();
+      const heure = now.toTimeString().slice(0, 8);
+      const az = calcAzimut(myLat, myLon, m.lat, m.lon);
+      const line = [
+        heure,
+        did,
+        m.lat.toFixed(7),
+        m.lon.toFixed(7),
+        m.alt.toFixed(1),
+        m.dist.toFixed(0),
+        az,
+        m.etat,
+        m.rssi.toFixed(0)
+      ].join(';');
+      logLines.push(line);
+      const n = logLines.length - 1;
+      document.getElementById('log-info').textContent = n + ' trames';
+    }
+
+    function downloadLog() {
+      if (logLines.length <= 1) {
+        setStatus('Log vide — rien à télécharger');
+        return;
+      }
+      const now = logStartTime || new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const stamp = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate())
+                  + '_' + pad(now.getHours()) + pad(now.getMinutes());
+      const filename = 'DLXR_log_' + stamp + '.csv';
+      const blob = new Blob([logLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      setStatus('Fichier téléchargé : ' + filename);
+    }
+    // ──────────────────────────────────────────────────────────────
+
+    async function autoReconnect() {
+      if (!bleDevice) { isReconnecting = false; return; }
+      try {
+        setStatus('RECONNEXION EN COURS...');
+        const server  = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        bleCharact    = await service.getCharacteristic(CHARACT_UUID);
+        await bleCharact.startNotifications();
+        bleCharact.addEventListener('characteristicvaluechanged', e => {
+          handleData(new TextDecoder().decode(e.target.value));
+        });
+        // Restaurer l'opacité des marqueurs
+        Object.values(models).forEach(m => {
+          if (m.marker) {
+            m.marker.setOpacity(1.0);
+            const row = document.getElementById('row-' + m.did);
+            if (row) row.style.opacity = '1';
+          }
+        });
+        const btn = document.getElementById('ble-btn');
+        btn.textContent = '✓ CONNECTÉ';
+        btn.classList.add('connected');
+        setStatus('BLE RECONNECTÉ — EN ÉCOUTE');
+        isReconnecting = false;
+      } catch(e) {
+        // Réessayer dans 5s
+        setStatus('Échec reconnexion — nouvel essai dans 5s...');
+        reconnectTimer = setTimeout(() => autoReconnect(), 5000);
+      }
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+
+    // Nettoyage automatique des modèles inactifs (toutes les 30s)
+    const MODEL_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+    setInterval(() => {
+      const now = Date.now();
+      Object.keys(models).forEach(did => {
+        const m = models[did];
+        if (m.lastSeen > 0 && (now - m.lastSeen) > MODEL_TIMEOUT_MS) {
+          // Supprimer le marqueur et la trace de la carte
+          if (m.marker)   { map.removeLayer(m.marker);   }
+          if (m.polyline) { map.removeLayer(m.polyline); }
+          if (m.linkLine) { map.removeLayer(m.linkLine); }
+          // Supprimer la ligne du panel
+          if (m.rowEl) { m.rowEl.remove(); }
+          // Supprimer du registre
+          delete models[did];
+          setStatus(`Modèle ${did} retiré (inactif > 2 min)`);
+        }
+      });
+      // Remettre le message "En attente" si plus aucun modèle
+      if (Object.keys(models).length === 0) {
+        const list = document.getElementById('models-list');
+        if (!document.getElementById('no-model')) {
+          const div = document.createElement('div');
+          div.id = 'no-model';
+          div.textContent = 'En attente de signal...';
+          list.appendChild(div);
+        }
+      }
+    }, 30000);
+
+    // Reconnexion automatique au réveil de l'écran
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && bleDevice && !bleDevice.gatt.connected && !isReconnecting) {
+        isReconnecting = true;
+        setStatus('Réveil détecté — reconnexion BLE...');
+        reconnectTimer = setTimeout(() => autoReconnect(), 1000);
+      }
+    });
+
+    // Event listeners boutons log — plus fiables que onclick sur mobile
+    document.getElementById('log-btn').addEventListener('click', toggleLog);
+    document.getElementById('log-btn').addEventListener('touchend', function(e) {
+      e.preventDefault();
+      toggleLog();
+    });
+    document.getElementById('dl-btn').addEventListener('click', downloadLog);
+    document.getElementById('dl-btn').addEventListener('touchend', function(e) {
+      e.preventDefault();
+      downloadLog();
+    });
+
+    startGeolocation();
+  </script>
+</body>
+</html>
